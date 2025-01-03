@@ -1,0 +1,16 @@
+services:
+  proxy:
+    image: localhost-proxy
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    secrets:
+      - ssh_host_key
+      - ssh_password
+
+secrets:
+  ssh_host_key:
+    file: ./ssh_host_key
+  ssh_password:
+    file: ./ssh_password

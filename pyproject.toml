@@ -1,0 +1,7 @@
+[tool.basedpyright]
+include = ["src"]
+
+reportUnusedCallResult = false
+
+pythonVersion = "3.12.8"
+pythonPlatform = "Linux"
