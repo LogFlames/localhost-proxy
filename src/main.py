@@ -9,17 +9,39 @@ from typing import Optional, override
 with open('/run/secrets/ssh_password', 'r') as f:
     SSH_PASSWORD = bcrypt.hashpw(f.read().strip().encode('utf-8'), bcrypt.gensalt())
 
-async def handle_client(process: asyncssh.SSHServerProcess) -> None:
-    print("Handle client")
-    process.stdout.write(f'random.bittan-ci-proxy.fysiksektionen.se\n')
-    await process.stdout.drain()
+async def get_port(process: asyncssh.SSHServerProcess):
+    while True:
+        await asyncio.sleep(0.1)
+        conn = process.channel.get_connection()
+        if not conn:
+            continue
+        if "custom_forward_port" not in dir(conn):
+            continue
+        return conn.custom_forward_port
+
+async def read_infinite(process: asyncssh.SSHServerProcess) -> None:
     try:
         async for line in process.stdin:
             if not line:
-                process.stdout.write('EOF received\n')
                 break
     except asyncssh.BreakReceived:
-        process.stdout.write('Break received\n')
+        pass
+
+async def handle_client(process: asyncssh.SSHServerProcess) -> None:
+    await process.stdout.drain()
+
+    read = asyncio.create_task(read_infinite(process))
+
+    port = await get_port(process)
+
+    # Create NGINX config
+    process.stdout.write(f'{port}.bittan-ci-proxy.fysiksektionen.se\n')
+
+    await read
+
+    if port is not None:
+        # Disable nginx proxy
+        pass
 
     process.exit(0)
 
@@ -28,7 +50,7 @@ def wrap_forward_local_port(conn):
     def forward_local_port(listen_host: str, listen_port: int, dest_host: str, dest_port: int, accept_handler: Optional[asyncssh.SSHAcceptHandler] = None) -> asyncssh.SSHListener:
         if (listen_host, listen_port) == (dest_host, dest_port):
             listen_port = random.randint(10000, 65535)
-            # dest_port = listen_port
+            conn.custom_forward_port = listen_port 
         print(f'Forwarding local port {listen_host}:{listen_port} to {dest_host}:{dest_port}')
         return original_method(listen_host, listen_port, dest_host, dest_port, accept_handler)
     conn.forward_local_port = forward_local_port
@@ -65,7 +87,7 @@ class LocalhostProxySSHServer(asyncssh.SSHServer):
         return bcrypt.checkpw(password.encode('utf-8'), SSH_PASSWORD)
 
     @override
-    def server_requested(self, listen_host: str, listen_port: int) -> asyncssh.SSHListener | bool:
+    def server_requested(self, listen_host: str, listen_port: int) -> bool:
         return True
 
 async def start_server() -> None:
