@@ -9,35 +9,29 @@ from typing import Optional, override
 with open('/run/secrets/ssh_password', 'r') as f:
     SSH_PASSWORD = bcrypt.hashpw(f.read().strip().encode('utf-8'), bcrypt.gensalt())
 
-class PortListener(asyncssh.SSHListener):
-    def __init__(self, conn: asyncssh.SSHServerConnection, client_host: str, client_port: int, server_port: int):
-        super().__init__()
-
-        self._conn = conn
-        self._client_host = client_host
-        self._client_port = client_port
-        self._port = server_port
-
-        conn.create_task(self._open_connection())
-
-    async def _open_connection(self):
-        reader, writer = await self._conn.open_connection(self._client_host, self._client_port)
-        while True:
-            await asyncio.sleep(1)
-            writer.write(f'random.bittan-ci-proxy.fysiksektionen.se\n')
-
-    def close(self):
-        """Stop listening for new connections"""
-
-    async def wait_closed(self):
-        """Wait for the listener to close"""
-
 async def handle_client(process: asyncssh.SSHServerProcess) -> None:
     print("Handle client")
     process.stdout.write(f'random.bittan-ci-proxy.fysiksektionen.se\n')
     await process.stdout.drain()
-    async for line in process.stdin:
-        pass
+    try:
+        async for line in process.stdin:
+            if not line:
+                process.stdout.write('EOF received\n')
+                break
+    except asyncssh.BreakReceived:
+        process.stdout.write('Break received\n')
+
+    process.exit(0)
+
+def wrap_forward_local_port(conn):
+    original_method = conn.forward_local_port
+    def forward_local_port(listen_host: str, listen_port: int, dest_host: str, dest_port: int, accept_handler: Optional[asyncssh.SSHAcceptHandler] = None) -> asyncssh.SSHListener:
+        if (listen_host, listen_port) == (dest_host, dest_port):
+            listen_port = random.randint(10000, 65535)
+            # dest_port = listen_port
+        print(f'Forwarding local port {listen_host}:{listen_port} to {dest_host}:{dest_port}')
+        return original_method(listen_host, listen_port, dest_host, dest_port, accept_handler)
+    conn.forward_local_port = forward_local_port
 
 class LocalhostProxySSHServer(asyncssh.SSHServer):
     def __init__(self):
@@ -49,6 +43,7 @@ class LocalhostProxySSHServer(asyncssh.SSHServer):
         print(f'SSH connection received from {peername}.')
 
         self._conn = conn
+        wrap_forward_local_port(self._conn)
 
     @override
     def connection_lost(self, exc: Optional[Exception]) -> None:
@@ -70,12 +65,8 @@ class LocalhostProxySSHServer(asyncssh.SSHServer):
         return bcrypt.checkpw(password.encode('utf-8'), SSH_PASSWORD)
 
     @override
-    def server_requested(self, listen_host: str, listen_port: int) -> asyncssh.SSHListener:
-        assert self._conn is not None
-
-        port = random.randint(30000, 65535)
-        print("Listening on port", port)
-        return PortListener(self._conn, listen_host, listen_port, port)
+    def server_requested(self, listen_host: str, listen_port: int) -> asyncssh.SSHListener | bool:
+        return True
 
 async def start_server() -> None:
     await asyncssh.create_server(LocalhostProxySSHServer, '', 8022,
