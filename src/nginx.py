@@ -28,7 +28,7 @@ def create_nginx_conf(domain, port):
 
         subprocess.run(["nginx", "-t"], check=True)
 
-        subprocess.run(["systemctl", "reload", "nginx"], check=True)
+        subprocess.run(["service", "nginx", "reload"], check=True)
         print("NGINX reloaded successfully.")
 
     except subprocess.CalledProcessError as e:
@@ -45,7 +45,7 @@ def disable_nginx_proxy(domain):
 
         print(f"NGINX configuration removed from {conf_file_path}")
 
-        subprocess.run(["systemctl", "reload", "nginx"], check=True)
+        subprocess.run(["service", "nginx", "reload"], check=True)
         print("NGINX reloaded successfully.")
 
     except FileNotFoundError:

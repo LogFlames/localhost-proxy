@@ -3,15 +3,32 @@ import asyncssh
 import bcrypt
 import sys
 import random
+import uuid
+import os
 from typing import Optional, override
 
 from nginx import create_nginx_conf, disable_nginx_proxy
 
+if not os.path.exists('/run/secrets/ssh_password'):
+    print("No SSH PASSWRD secret found. Exiting.")
+    sys.exit(1)
+
 with open('/run/secrets/ssh_password', 'r') as f:
     SSH_PASSWORD = bcrypt.hashpw(f.read().strip().encode('utf-8'), bcrypt.gensalt())
 
+if "DOMAIN" not in os.environ:
+    print("DOMAIN environment variable not set. Exiting.")
+    sys.exit(1)
+
+if "PROTOCOL" not in os.environ:
+    print("PROTOCOL environment variable not set. Exiting.")
+    sys.exit(1)
+
+DOMAIN = os.environ["DOMAIN"]
+PROTOCOL = os.environ["PROTOCOL"]
+
 async def get_port(process: asyncssh.SSHServerProcess):
-    while True:
+    for _ in range(100): # timeout after 10 seconds
         await asyncio.sleep(0.1)
         conn = process.channel.get_connection()
         if not conn:
@@ -19,6 +36,7 @@ async def get_port(process: asyncssh.SSHServerProcess):
         if "custom_forward_port" not in dir(conn):
             continue
         return conn.custom_forward_port
+    return None
 
 async def read_infinite(process: asyncssh.SSHServerProcess) -> None:
     try:
@@ -35,16 +53,20 @@ async def handle_client(process: asyncssh.SSHServerProcess) -> None:
 
     port = await get_port(process)
 
+    if port is None:
+        process.stdout.write("Timed out waiting for port.\n")
+        process.exit(1)
+
+    uid = str(uuid.uuid4())
     # Create NGINX config
-    nginx_domain = f'{port}.bittan-ci-proxy.fysiksektionen.se'
+    nginx_domain = DOMAIN.format(uid)
     create_nginx_conf(nginx_domain, port)
-    process.stdout.write(f'{port}.bittan-ci-proxy.fysiksektionen.se\n')
+    process.stdout.write(PROTOCOL + "://" + nginx_domain + "\n")
 
     await read
 
     if port is not None:
-        create_nginx_conf(nginx_domain, port)
-        # Disable nginx proxy
+        disable_nginx_proxy(nginx_domain)
         pass
 
     process.exit(0)
