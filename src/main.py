@@ -3,8 +3,9 @@ import asyncssh
 import bcrypt
 import sys
 import random
-
 from typing import Optional, override
+
+from nginx import create_nginx_conf, disable_nginx_proxy
 
 with open('/run/secrets/ssh_password', 'r') as f:
     SSH_PASSWORD = bcrypt.hashpw(f.read().strip().encode('utf-8'), bcrypt.gensalt())
@@ -35,11 +36,14 @@ async def handle_client(process: asyncssh.SSHServerProcess) -> None:
     port = await get_port(process)
 
     # Create NGINX config
+    nginx_domain = f'{port}.bittan-ci-proxy.fysiksektionen.se'
+    create_nginx_conf(nginx_domain, port)
     process.stdout.write(f'{port}.bittan-ci-proxy.fysiksektionen.se\n')
 
     await read
 
     if port is not None:
+        create_nginx_conf(nginx_domain, port)
         # Disable nginx proxy
         pass
 

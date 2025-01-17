@@ -8,6 +8,9 @@ services:
     secrets:
       - ssh_host_key
       - ssh_password
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
 
 secrets:
   ssh_host_key:
